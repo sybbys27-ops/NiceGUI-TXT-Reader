@@ -10,7 +10,7 @@ ui.add_head_html("""
 body { font-family: 'Malgun Gothic', 'Noto Sans KR', sans-serif; }
 .reader textarea { line-height: 1.85 !important; }
 </style>
-""")
+""", shared=True)
 
 @ui.page('/')
 def index():
