@@ -1,7 +1,5 @@
-"""Desktop-style NiceGUI TXT reader prototype. DB/login are not enabled yet."""
+"""Personal NiceGUI TXT reader with PIN login and Neon persistence."""
 import inspect
-import asyncio
-import hmac
 import time
 import json
 import logging
@@ -136,8 +134,8 @@ def index():
         return
 
     state = {'source': 'new', 'editing': False, 'theme': '라이트', 'book_id': None, 'original_name': '', 'original_text': ''}
-    themes = {'라이트': ('#ffffff', '#1e242b'), '다크': ('#202124', '#f1f1f1'), '기본색': ('#ffffff', '#1e242b')}
-    colors = {'bg': '#ffffff', 'fg': '#1e242b'}
+    themes = {'라이트': ('#ECEFE6', '#2A2A2A'), '다크': ('#22252A', '#E5E0D8'), '기본색': ('#ffffff', '#1e242b')}
+    colors = {'bg': '#ECEFE6', 'fg': '#2A2A2A'}
     custom_colors = {'bg': '#ffffff', 'fg': '#1e242b'}
     persistence = {'settings_dirty': False, 'last_position': None}
     archive_rows = {}
@@ -255,7 +253,6 @@ def index():
                     apply();
                 }})
             """, timeout=12.0)
-            logging.info('Restored reading position target=%.6f result=%s', value, result)
         except Exception:
             logging.exception('Reading position restore failed')
 
@@ -415,11 +412,6 @@ def index():
                 ui.notify('문서를 찾을 수 없습니다.', type='warning')
                 return
 
-            logging.info(
-                'BOOK_LOAD_DIAG id=%s filename=%s reading_position=%r type=%s',
-                book[0], book[1], book[3], type(book[3]).__name__,
-            )
-
             # A book switch discards any unsaved temporary scroll position.
             await reset_scroll()
 
@@ -428,8 +420,7 @@ def index():
             reader.value = book[2]
             set_mode(False)
 
-            # Diagnostic test: do not rebuild MY ARCHIVE here.
-            # This keeps the click event's NiceGUI slot alive while restoring scroll.
+            # Keep archive rows alive; rebuilding them here deletes the click slot.
             await restore_position(book[3])
             refresh_archive_selection(book[0])
             ui.notify('DB 문서를 불러왔습니다.', type='positive')
