@@ -23,6 +23,7 @@ html, body, #app { overflow:hidden!important; }
 .reader-shell { display:flex; flex-direction:column; width:100%; height:100dvh; max-height:100dvh; min-height:0; overflow:hidden; background:#edf2f6; }
 .reader-header { height:31px; flex:0 0 31px; background:#0877c6; color:white; padding:5px 12px; font-size:12px; }
 .reader-toolbar { flex:0 0 auto; display:flex; flex-wrap:wrap; align-items:center; gap:5px; padding:7px 10px; background:#f1f1f1; border-bottom:1px solid #d0d4d8; min-height:54px; }
+.reader-toolbar .q-btn.selected-tool { background:#234b70!important; color:#ffffff!important; border-color:#173a5c!important; box-shadow:inset 0 0 0 1px #173a5c!important; }
 .reader-toolbar .q-btn { min-height:28px; padding:0 7px; font-size:12px; border:1px solid #bfc4c9; border-radius:1px; background:#fafafa; color:#1e252c; box-shadow:none; text-transform:none; }
 .reader-toolbar .q-field { font-size:12px; }
 .reader-toolbar .q-field__control { min-height:30px; height:30px; }
@@ -56,13 +57,30 @@ html, body, #app { overflow:hidden!important; }
 
 @ui.page('/')
 def index():
-    state = {'source': 'new', 'editing': False}
+    state = {'source': 'new', 'editing': False, 'theme': '라이트'}
     themes = {'라이트': ('#ffffff', '#1e242b'), '다크': ('#202124', '#f1f1f1'), '세피아': ('#f5ecd9', '#4b3d2b')}
     colors = {'bg': '#ffffff', 'fg': '#1e242b'}
 
+    def refresh_selected():
+        for name, button in theme_buttons.items():
+            button.classes(add='selected-tool' if name == state['theme'] else None,
+                           remove='selected-tool' if name != state['theme'] else None)
+        read_button.classes(add='selected-tool' if not state['editing'] else None,
+                            remove='selected-tool' if state['editing'] else None)
+        edit_button.classes(add='selected-tool' if state['editing'] else None,
+                            remove='selected-tool' if not state['editing'] else None)
+
     def set_theme(name):
+        state['theme'] = name
         colors['bg'], colors['fg'] = themes[name]
         apply_style()
+        refresh_selected()
+
+    def custom_color(kind, value):
+        colors[kind] = value
+        state['theme'] = None
+        apply_style()
+        refresh_selected()
 
     def apply_style():
         size = int(font_size.value or 16)
@@ -79,6 +97,7 @@ def index():
         else:
             reader.props('readonly')
         mode_label.text = '수정 모드' if edit else '읽기 모드'
+        refresh_selected()
 
     def new_page():
         filename.value = ''
@@ -138,18 +157,26 @@ def index():
             font_size = ui.number(value=16, min=10, max=36, step=1).props('dense outlined').classes('w-16')
             ui.label('줄간격:')
             line_spacing = ui.number(value=1.8, min=1.0, max=3.0, step=0.1, format='%.1f').props('dense outlined').classes('w-16')
-            with ui.menu() as background_menu:
-                ui.color_input(label='배경색', value='#ffffff', on_change=lambda e: (colors.__setitem__('bg', e.value), apply_style()))
-            ui.button('바탕색 변경', on_click=background_menu.open)
-            with ui.menu() as foreground_menu:
-                ui.color_input(label='글자색', value='#1e242b', on_change=lambda e: (colors.__setitem__('fg', e.value), apply_style()))
-            ui.button('글자색 변경', on_click=foreground_menu.open)
+            with ui.dialog() as background_dialog, ui.card():
+                ui.label('바탕색 변경')
+                ui.color_input(label='배경색', value='#ffffff',
+                               on_change=lambda e: custom_color('bg', e.value))
+                ui.button('닫기', on_click=background_dialog.close)
+            ui.button('바탕색 변경', on_click=background_dialog.open)
+            with ui.dialog() as foreground_dialog, ui.card():
+                ui.label('글자색 변경')
+                ui.color_input(label='글자색', value='#1e242b',
+                               on_change=lambda e: custom_color('fg', e.value))
+                ui.button('닫기', on_click=foreground_dialog.close)
+            ui.button('글자색 변경', on_click=foreground_dialog.open)
             ui.separator().props('vertical').classes('h-6 mx-1')
-            for label in themes:
-                ui.button(label, on_click=lambda name=label: set_theme(name))
+            theme_buttons = {
+                label: ui.button(label, on_click=lambda name=label: set_theme(name))
+                for label in themes
+            }
             ui.separator().props('vertical').classes('h-6 mx-1')
-            ui.button('읽기', on_click=switch_to_read)
-            ui.button('수정', on_click=lambda: set_mode(True))
+            read_button = ui.button('읽기', on_click=switch_to_read)
+            edit_button = ui.button('수정', on_click=lambda: set_mode(True))
             ui.space()
             ui.button('DB 불러오기').props('disable').tooltip('NeonDB 연결 후 활성화됩니다.')
             ui.button('DB 저장하기').props('disable').tooltip('NeonDB 연결 후 활성화됩니다.')
@@ -174,6 +201,7 @@ def index():
     font_size.on('update:model-value', apply_style)
     line_spacing.on('update:model-value', apply_style)
     apply_style()
+    refresh_selected()
 
 
 ui.run(host='0.0.0.0', port=int(os.getenv('PORT', '8080')), reload=False, title='TXT Reader')
