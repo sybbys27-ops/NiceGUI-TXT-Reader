@@ -419,9 +419,9 @@ def index():
             filename.value = book[1]
             reader.value = book[2]
             set_mode(False)
-            reload_books()
 
-            # Restore only the position explicitly saved for this book.
+            # Diagnostic test: do not rebuild MY ARCHIVE here.
+            # This keeps the click event's NiceGUI slot alive while restoring scroll.
             await restore_position(book[3])
             ui.notify('DB 문서를 불러왔습니다.', type='positive')
         except Exception:
