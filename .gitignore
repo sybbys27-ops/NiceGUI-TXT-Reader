@@ -218,3 +218,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# TXT Reader secrets and database files
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
