@@ -140,6 +140,7 @@ def index():
     colors = {'bg': '#ffffff', 'fg': '#1e242b'}
     custom_colors = {'bg': '#ffffff', 'fg': '#1e242b'}
     persistence = {'settings_dirty': False, 'last_position': None}
+    archive_rows = {}
 
     def mark_settings_dirty():
         persistence['settings_dirty'] = True
@@ -398,6 +399,13 @@ def index():
         else:
             ui.notify('본문 저장 완료. 읽던 위치 저장은 실패했습니다 (Render 로그 확인).', type='warning')
 
+    def refresh_archive_selection(active_book_id):
+        for bid, row in archive_rows.items():
+            if bid == active_book_id:
+                row.classes(add='archive-active')
+            else:
+                row.classes(remove='archive-active')
+
     async def open_book(book_id):
         if not require_login():
             return
@@ -423,6 +431,7 @@ def index():
             # Diagnostic test: do not rebuild MY ARCHIVE here.
             # This keeps the click event's NiceGUI slot alive while restoring scroll.
             await restore_position(book[3])
+            refresh_archive_selection(book[0])
             ui.notify('DB 문서를 불러왔습니다.', type='positive')
         except Exception:
             logging.exception('DB load failed')
@@ -454,12 +463,14 @@ def index():
         if not require_login():
             return
         archive.clear()
+        archive_rows.clear()
         try:
             books = db.list_books()
             with archive:
                 for book_id, book_name, modified in books:
                     selected = book_id == state['book_id']
-                    with ui.row().classes('archive-entry' + (' archive-active' if selected else '')):
+                    with ui.row().classes('archive-entry' + (' archive-active' if selected else '')) as row:
+                        archive_rows[book_id] = row
                         ui.button(book_name, on_click=lambda bid=book_id: open_book(bid)).props('flat no-caps dense').classes('archive-title').tooltip(book_name)
                         ui.button(icon='delete_outline', on_click=lambda bid=book_id, name=book_name: confirm_delete(bid, name)).props('flat round dense').classes('archive-delete').tooltip('삭제')
                 if not books:
