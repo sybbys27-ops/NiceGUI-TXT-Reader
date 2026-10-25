@@ -133,8 +133,9 @@ def index():
         return
 
     state = {'source': 'new', 'editing': False, 'theme': '라이트', 'book_id': None, 'original_name': '', 'original_text': ''}
-    themes = {'라이트': ('#ffffff', '#1e242b'), '다크': ('#202124', '#f1f1f1'), '세피아': ('#f5ecd9', '#4b3d2b')}
+    themes = {'라이트': ('#ffffff', '#1e242b'), '다크': ('#202124', '#f1f1f1'), '기본색': ('#ffffff', '#1e242b')}
     colors = {'bg': '#ffffff', 'fg': '#1e242b'}
+    custom_colors = {'bg': '#ffffff', 'fg': '#1e242b'}
     persistence = {'settings_dirty': False, 'last_position': None}
 
     def mark_settings_dirty():
@@ -143,8 +144,8 @@ def index():
     def collect_settings():
         return {
             'theme': state['theme'],
-            'bg': colors['bg'],
-            'fg': colors['fg'],
+            'bg': custom_colors['bg'],
+            'fg': custom_colors['fg'],
             'font_size': max(10, min(36, int(font_size.value or 16))),
             'line_spacing': max(1.0, min(3.0, float(line_spacing.value or 1.8))),
         }
@@ -154,15 +155,16 @@ def index():
         state['theme'] = theme if theme in themes else None
         for key, default in [('bg', '#ffffff'), ('fg', '#1e242b')]:
             value = settings.get(key, default)
-            colors[key] = value if isinstance(value, str) and re.fullmatch(r'#[0-9a-fA-F]{6}', value) else default
+            custom_colors[key] = value if isinstance(value, str) and re.fullmatch(r'#[0-9a-fA-F]{6}', value) else default
         try:
             font_size.value = max(10, min(36, int(settings.get('font_size', 16))))
             line_spacing.value = max(1.0, min(3.0, float(settings.get('line_spacing', 1.8))))
         except (TypeError, ValueError):
             font_size.value = 16
             line_spacing.value = 1.8
-        background_picker.value = colors['bg']
-        foreground_picker.value = colors['fg']
+        colors.update(custom_colors if state['theme'] in ('기본색', None) else dict(zip(('bg','fg'), themes[state['theme']])))
+        background_picker.value = custom_colors['bg']
+        foreground_picker.value = custom_colors['fg']
         apply_style()
         refresh_selected()
 
@@ -218,14 +220,15 @@ def index():
 
     def set_theme(name):
         state['theme'] = name
-        colors['bg'], colors['fg'] = themes[name]
+        colors.update(custom_colors if name == '기본색' else dict(zip(('bg', 'fg'), themes[name])))
         apply_style()
         refresh_selected()
         mark_settings_dirty()
 
     def custom_color(kind, value):
-        colors[kind] = value
-        state['theme'] = None
+        custom_colors[kind] = value
+        colors.update(custom_colors)
+        state['theme'] = '기본색'
         apply_style()
         refresh_selected()
         mark_settings_dirty()
