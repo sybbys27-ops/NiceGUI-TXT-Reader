@@ -8,6 +8,7 @@ import os
 
 from argon2 import PasswordHasher, exceptions as argon_errors
 from nicegui import app, ui
+import db
 
 MAX_BYTES = 3 * 1024 * 1024
 PASSWORD_HASH = os.getenv('APP_PASSWORD_HASH', '')
@@ -122,7 +123,7 @@ def index():
                 password_input.on('keydown.enter', try_login)
         return
 
-    state = {'source': 'new', 'editing': False, 'theme': '라이트'}
+    state = {'source': 'new', 'editing': False, 'theme': '라이트', 'book_id': None, 'original_name': '', 'original_text': ''}
     themes = {'라이트': ('#ffffff', '#1e242b'), '다크': ('#202124', '#f1f1f1'), '세피아': ('#f5ecd9', '#4b3d2b')}
     colors = {'bg': '#ffffff', 'fg': '#1e242b'}
 
@@ -171,13 +172,14 @@ def index():
     def new_page():
         filename.value = ''
         reader.value = ''
-        state['source'] = 'new'
+        state.update(source='new', book_id=None, original_name='', original_text='')
         set_mode(True)
         ui.notify('새 페이지를 만들었습니다.')
 
     def switch_to_read():
-        # DB-loaded unsaved edits will revert when DB persistence is implemented.
-        # New or PC-loaded documents must not be silently destroyed.
+        if state['source'] == 'db':
+            filename.value = state['original_name']
+            reader.value = state['original_text']
         set_mode(False)
 
     async def load_text(event):
@@ -198,7 +200,7 @@ def index():
                     return
             filename.value = event.file.name.rsplit('.', 1)[0]
             reader.value = content
-            state['source'] = 'pc'
+            state.update(source='pc', book_id=None, original_name=filename.value, original_text=content)
             set_mode(False)
             ui.notify(f'TXT 파일을 불러왔습니다: {event.file.name}', type='positive')
         except Exception:
@@ -206,6 +208,84 @@ def index():
             ui.notify('파일 읽기에 실패했습니다. Render Logs를 확인해주세요.', type='negative')
         finally:
             uploader.reset()
+
+    def require_login():
+        if not session_is_valid():
+            ui.notify('세션이 만료되었습니다. 다시 로그인하세요.', type='negative')
+            ui.navigate.to('/')
+            return False
+        return True
+
+    def save_to_db():
+        if not require_login():
+            return
+        try:
+            book_id = db.save_book(state['book_id'], filename.value or '', reader.value or '')
+            state.update(source='db', book_id=book_id,
+                         original_name=filename.value, original_text=reader.value or '')
+            set_mode(False)
+            reload_books()
+            ui.notify('DB 저장 완료', type='positive')
+        except Exception:
+            logging.exception('DB save failed')
+            ui.notify('저장 실패: 파일명, 용량, DB 연결을 확인하세요.', type='negative')
+
+    def open_book(book_id):
+        if not require_login():
+            return
+        try:
+            book = db.get_book(book_id)
+            if not book:
+                ui.notify('문서를 찾을 수 없습니다.', type='warning')
+                return
+            state.update(source='db', book_id=book[0], original_name=book[1], original_text=book[2])
+            filename.value = book[1]
+            reader.value = book[2]
+            set_mode(False)
+            ui.notify('DB 문서를 불러왔습니다.', type='positive')
+        except Exception:
+            logging.exception('DB load failed')
+            ui.notify('DB 문서를 열지 못했습니다.', type='negative')
+
+    def remove_book(book_id):
+        if not require_login():
+            return
+        try:
+            db.delete_book(book_id)
+            if state['book_id'] == book_id:
+                new_page()
+            reload_books()
+            ui.notify('영구 삭제했습니다.', type='positive')
+        except Exception:
+            logging.exception('DB delete failed')
+            ui.notify('삭제에 실패했습니다.', type='negative')
+
+    def confirm_delete(book_id, name):
+        with ui.dialog() as dialog, ui.card():
+            ui.label(f'“{name}” 문서를 영구 삭제할까요?')
+            with ui.row():
+                ui.button('취소', on_click=dialog.close)
+                ui.button('영구 삭제', color='negative',
+                          on_click=lambda: (dialog.close(), remove_book(book_id)))
+        dialog.open()
+
+    def reload_books():
+        if not require_login():
+            return
+        archive.clear()
+        try:
+            books = db.list_books()
+            with archive:
+                for book_id, book_name, modified in books:
+                    with ui.row().classes('w-full items-center gap-1 border-b px-2 py-1'):
+                        ui.button(book_name, on_click=lambda bid=book_id: open_book(bid)).props('flat no-caps dense').classes('grow text-left').style('min-width:0;white-space:normal;')
+                        ui.button(icon='delete_outline', on_click=lambda bid=book_id, name=book_name: confirm_delete(bid, name)).props('flat dense').tooltip('삭제')
+                if not books:
+                    ui.label('저장된 책이 없습니다.').classes('text-xs p-2')
+        except Exception:
+            logging.exception('DB listing failed')
+            with archive:
+                ui.label('DB 연결이 필요합니다. Render DATABASE_URL을 확인하세요.').classes('text-xs p-2 text-red-600')
 
     def logout():
         clear_login()
@@ -251,8 +331,8 @@ def index():
             read_button = ui.button('읽기', on_click=switch_to_read)
             edit_button = ui.button('수정', on_click=lambda: set_mode(True))
             ui.space()
-            ui.button('DB 불러오기').props('disable').tooltip('NeonDB 연결 후 활성화됩니다.')
-            ui.button('DB 저장하기').props('disable').tooltip('NeonDB 연결 후 활성화됩니다.')
+            ui.button('DB 불러오기', on_click=reload_books)
+            ui.button('DB 저장하기', on_click=save_to_db)
             ui.button('로그아웃', on_click=logout)
         with ui.row().classes('reader-content w-full gap-0'):
             with ui.column().classes('reader-main gap-0') as panel:
@@ -266,8 +346,8 @@ def index():
                     ui.label('File Name').classes('text-xs font-bold')
                     filename = ui.input().props('dense borderless').classes('grow min-w-0')
                 ui.label('MY ARCHIVE').classes('archive-label')
-                with ui.column().classes('archive-scroller w-full gap-0'):
-                    ui.label('저장된 책 목록은 NeonDB 연결 후 표시됩니다.').classes('archive-note')
+                with ui.column().classes('archive-scroller w-full gap-0') as archive:
+                    ui.label('DB 연결 후 목록 새로고침').classes('archive-note')
         with ui.row().classes('status-note w-full items-center gap-3'):
             mode_label = ui.label('읽기 모드')
             ui.label('UI 미리보기 · DB 및 인증 미연결 · 개인 문서 업로드 주의')
@@ -276,6 +356,12 @@ def index():
     line_spacing.on('update:model-value', apply_style)
     apply_style()
     refresh_selected()
+    if os.getenv('DATABASE_URL'):
+        try:
+            db.ensure_schema()
+            reload_books()
+        except Exception:
+            logging.exception('Neon initialization failed')
 
 
 ui.run(
