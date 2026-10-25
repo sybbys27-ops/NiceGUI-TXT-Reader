@@ -88,7 +88,7 @@ def index():
         set_mode(False)
 
     async def load_text(event):
-        raw = event.content.read()
+        raw = event.file.read()
         if len(raw) > MAX_BYTES:
             ui.notify('TXT는 최대 3MB까지 지원합니다.', type='negative')
             return
@@ -100,7 +100,7 @@ def index():
             except UnicodeDecodeError:
                 ui.notify('UTF-8 또는 CP949 인코딩만 지원합니다.', type='negative')
                 return
-        filename.value = event.name.rsplit('.', 1)[0]
+        filename.value = event.file.name.rsplit('.', 1)[0]
         reader.value = content
         state['source'] = 'pc'
         set_mode(False)
