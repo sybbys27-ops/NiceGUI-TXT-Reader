@@ -5,6 +5,7 @@ import time
 import json
 import logging
 import os
+import re
 
 from argon2 import PasswordHasher, exceptions as argon_errors
 from nicegui import app, ui
@@ -134,6 +135,78 @@ def index():
     state = {'source': 'new', 'editing': False, 'theme': '라이트', 'book_id': None, 'original_name': '', 'original_text': ''}
     themes = {'라이트': ('#ffffff', '#1e242b'), '다크': ('#202124', '#f1f1f1'), '세피아': ('#f5ecd9', '#4b3d2b')}
     colors = {'bg': '#ffffff', 'fg': '#1e242b'}
+    persistence = {'settings_dirty': False, 'last_position': None}
+
+    def mark_settings_dirty():
+        persistence['settings_dirty'] = True
+
+    def collect_settings():
+        return {
+            'theme': state['theme'],
+            'bg': colors['bg'],
+            'fg': colors['fg'],
+            'font_size': max(10, min(36, int(font_size.value or 16))),
+            'line_spacing': max(1.0, min(3.0, float(line_spacing.value or 1.8))),
+        }
+
+    def restore_settings(settings):
+        theme = settings.get('theme', '라이트')
+        state['theme'] = theme if theme in themes else None
+        for key, default in [('bg', '#ffffff'), ('fg', '#1e242b')]:
+            value = settings.get(key, default)
+            colors[key] = value if isinstance(value, str) and re.fullmatch(r'#[0-9a-fA-F]{6}', value) else default
+        try:
+            font_size.value = max(10, min(36, int(settings.get('font_size', 16))))
+            line_spacing.value = max(1.0, min(3.0, float(settings.get('line_spacing', 1.8))))
+        except (TypeError, ValueError):
+            font_size.value = 16
+            line_spacing.value = 1.8
+        background_picker.value = colors['bg']
+        foreground_picker.value = colors['fg']
+        apply_style()
+        refresh_selected()
+
+    async def capture_position():
+        if not state['book_id'] or not session_is_valid() or state['editing']:
+            return
+        book_id = state['book_id']
+        try:
+            position = await ui.run_javascript(
+                f"""(() => {{
+                    const el = getElement({{reader.id}}).$el.querySelector('textarea');
+                    if (!el) return 0;
+                    const max = Math.max(0, el.scrollHeight - el.clientHeight);
+                    return max ? el.scrollTop / max : 0;
+                }})()""".replace('{reader.id}', str(reader.id)), timeout=5.0)
+            position = max(0.0, min(1.0, float(position)))
+            if book_id == state['book_id'] and (persistence['last_position'] is None or abs(position - persistence['last_position']) > 0.0001):
+                db.save_position(book_id, position)
+                persistence['last_position'] = position
+        except Exception:
+            logging.exception('Reading-position save failed')
+
+    async def restore_position(position):
+        value = max(0.0, min(1.0, float(position or 0.0)))
+        persistence['last_position'] = value
+        await ui.run_javascript(
+            f"""(() => {{
+                const el = getElement({{reader.id}}).$el.querySelector('textarea');
+                if (el) requestAnimationFrame(() => {{
+                    el.scrollTop = ({value}) * Math.max(0, el.scrollHeight - el.clientHeight);
+                }});
+            }})()""".replace('{reader.id}', str(reader.id)), timeout=5.0)
+
+    async def sync_persistence():
+        if not session_is_valid():
+            return
+        if persistence['settings_dirty']:
+            try:
+                db.save_settings(collect_settings())
+                persistence['settings_dirty'] = False
+            except Exception:
+                logging.exception('Reader settings save failed')
+        await capture_position()
+
 
     def refresh_selected():
         # Keep every button's original blue appearance. Only active text changes.
@@ -153,14 +226,17 @@ def index():
         colors['bg'], colors['fg'] = themes[name]
         apply_style()
         refresh_selected()
+        mark_settings_dirty()
 
     def custom_color(kind, value):
         colors[kind] = value
         state['theme'] = None
         apply_style()
         refresh_selected()
+        mark_settings_dirty()
 
     def apply_style():
+        mark_settings_dirty()
         size = int(font_size.value or 16)
         space = float(line_spacing.value or 1.8)
         panel.style(
@@ -177,7 +253,8 @@ def index():
         mode_label.text = '수정 모드' if edit else '읽기 모드'
         refresh_selected()
 
-    def new_page():
+    async def new_page():
+        await capture_position()
         filename.value = ''
         reader.value = ''
         state.update(source='new', book_id=None, original_name='', original_text='')
@@ -191,6 +268,7 @@ def index():
         set_mode(False)
 
     async def load_text(event):
+        await capture_position()
         try:
             raw = event.file.read()
             if inspect.isawaitable(raw):
@@ -224,7 +302,8 @@ def index():
             return False
         return True
 
-    def save_to_db():
+    async def save_to_db():
+        await capture_position()
         if not require_login():
             return
         try:
@@ -238,7 +317,8 @@ def index():
             logging.exception('DB save failed')
             ui.notify('저장 실패: 파일명, 용량, DB 연결을 확인하세요.', type='negative')
 
-    def open_book(book_id):
+    async def open_book(book_id):
+        await capture_position()
         if not require_login():
             return
         try:
@@ -251,6 +331,7 @@ def index():
             reader.value = book[2]
             set_mode(False)
             reload_books()
+            await restore_position(book[3])
             ui.notify('DB 문서를 불러왔습니다.', type='positive')
         except Exception:
             logging.exception('DB load failed')
@@ -262,7 +343,7 @@ def index():
         try:
             db.delete_book(book_id)
             if state['book_id'] == book_id:
-                new_page()
+                ui.navigate.to('/')
             reload_books()
             ui.notify('영구 삭제했습니다.', type='positive')
         except Exception:
@@ -297,7 +378,8 @@ def index():
             with archive:
                 ui.label('DB 연결이 필요합니다. Render DATABASE_URL을 확인하세요.').classes('text-xs p-2 text-red-600')
 
-    def logout():
+    async def logout():
+        await sync_persistence()
         clear_login()
         ui.navigate.to('/')
 
@@ -322,13 +404,13 @@ def index():
             line_spacing = ui.number(value=1.8, min=1.0, max=3.0, step=0.1, format='%.1f').props('dense outlined').classes('w-16')
             with ui.dialog() as background_dialog, ui.card():
                 ui.label('바탕색 변경')
-                ui.color_input(label='배경색', value='#ffffff',
+                background_picker = ui.color_input(label='배경색', value='#ffffff',
                                on_change=lambda e: custom_color('bg', e.value))
                 ui.button('닫기', on_click=background_dialog.close)
             ui.button('바탕색 변경', on_click=background_dialog.open)
             with ui.dialog() as foreground_dialog, ui.card():
                 ui.label('글자색 변경')
-                ui.color_input(label='글자색', value='#1e242b',
+                foreground_picker = ui.color_input(label='글자색', value='#1e242b',
                                on_change=lambda e: custom_color('fg', e.value))
                 ui.button('닫기', on_click=foreground_dialog.close)
             ui.button('글자색 변경', on_click=foreground_dialog.open)
@@ -368,9 +450,14 @@ def index():
     if os.getenv('DATABASE_URL'):
         try:
             db.ensure_schema()
+            saved_settings = db.load_settings()
+            if saved_settings:
+                restore_settings(saved_settings)
             reload_books()
         except Exception:
             logging.exception('Neon initialization failed')
+    persistence['settings_dirty'] = False
+    ui.timer(3.0, sync_persistence)
 
 
 ui.run(
