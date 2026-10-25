@@ -40,3 +40,10 @@ New and PC-loaded documents will INSERT a new UUID when saved. DB-loaded books w
 비밀번호, 비밀번호 해시, 세션 비밀키는 **절대로 GitHub에 커밋하지 마세요**. 둘 중 하나라도 비어 있으면 앱은 문서 화면 대신 초기 설정 안내를 표시합니다. 인증 세션은 최대 12시간입니다. 현재 로그인 실패 제한은 브라우저 연결 단위의 간단한 제한이며 공개 서비스에 대한 강력한 IP별 요청 제한을 대체하지 못합니다. 아직 Neon 저장 기능은 구현되지 않았습니다.
 
 PIN 정책: 개인용 간편 로그인은 **숫자 4자리**만 허용합니다. 비밀번호 검증에는 Argon2id 해시를 계속 사용하며, 로그인 유지시간은 12시간입니다. 4자리 PIN은 10,000가지 조합뿐이라 공개 URL에서 무차별 대입에 취약할 수 있습니다. 현재의 연결별 시도 제한 외에 배포 전 IP/전체 요청 제한을 추가하는 것이 좋습니다.
+
+
+## Neon DB 연결 (feature/neon-db)
+
+Render Environment에 `DATABASE_URL`을 등록하세요. Neon의 pooled PostgreSQL connection string을 그대로 사용하며 GitHub에 공개하지 않습니다. `APP_PASSWORD_HASH`와 `STORAGE_SECRET`도 유지해야 합니다.
+
+Render Branch를 `feature/neon-db`로 변경하면 앱은 첫 로그인 후 `documents` 테이블을 자동 생성합니다. 문서별 UUID를 기준으로 INSERT/UPDATE/DELETE하며, 우측 MY ARCHIVE 목록에서 선택 및 삭제할 수 있습니다. 글꼴 설정과 마지막 읽던 위치 저장은 다음 개발 단계입니다. **실제 DB에 연결해 실행 검증하기 전의 개발 기능입니다.**
