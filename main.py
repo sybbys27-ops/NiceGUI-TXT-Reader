@@ -211,31 +211,50 @@ def index():
         value = max(0.0, min(1.0, float(position or 0.0)))
         persistence['last_position'] = value
         try:
-            # NiceGUI/Quasar updates textarea.value asynchronously. Wait until
-            # the new book has actually been laid out before applying scroll.
-            await asyncio.sleep(0.20)
-            applied = await ui.run_javascript(f"""
-                (() => {{
-                    const el = document.querySelector('.reader-pane textarea');
-                    if (!el) throw new Error('Reader textarea DOM element missing');
-                    const max = Math.max(0, el.scrollHeight - el.clientHeight);
-                    el.scrollTop = {value} * max;
-                    return {{top: el.scrollTop, max: max}};
-                }})()
-            """, timeout=10.0)
-            logging.info('Restored reading position %.6f -> %s', value, applied)
+            result = await ui.run_javascript(f"""
+                new Promise((resolve, reject) => {{
+                    const target = {value};
+                    let tries = 0;
+                    let lastHeight = -1;
+                    let stableCount = 0;
 
-            # Some browsers/Quasar updates can still settle one frame later.
-            # Re-apply once after the layout has fully stabilized.
-            await asyncio.sleep(0.15)
-            await ui.run_javascript(f"""
-                (() => {{
-                    const el = document.querySelector('.reader-pane textarea');
-                    if (!el) throw new Error('Reader textarea DOM element missing');
-                    el.scrollTop = {value} * Math.max(0, el.scrollHeight - el.clientHeight);
-                    return el.scrollTop;
-                }})()
-            """, timeout=10.0)
+                    const apply = () => {{
+                        const el = document.querySelector('.reader-pane textarea');
+                        if (!el) {{
+                            if (++tries > 20) return reject(new Error('Reader textarea DOM element missing'));
+                            return setTimeout(apply, 50);
+                        }}
+
+                        const height = el.scrollHeight;
+                        if (height === lastHeight) stableCount += 1;
+                        else stableCount = 0;
+                        lastHeight = height;
+
+                        const max = Math.max(0, el.scrollHeight - el.clientHeight);
+                        el.scrollTop = target * max;
+
+                        // Wait until the new book layout stops changing, then
+                        // apply the saved position once more and verify it.
+                        if (stableCount >= 2 || ++tries > 20) {{
+                            setTimeout(() => {{
+                                const finalMax = Math.max(0, el.scrollHeight - el.clientHeight);
+                                el.scrollTop = target * finalMax;
+                                resolve({{
+                                    target: target,
+                                    top: el.scrollTop,
+                                    max: finalMax,
+                                    ratio: finalMax > 0 ? el.scrollTop / finalMax : 0
+                                }});
+                            }}, 120);
+                        }} else {{
+                            setTimeout(apply, 80);
+                        }}
+                    }};
+
+                    apply();
+                }})
+            """, timeout=12.0)
+            logging.info('Restored reading position target=%.6f result=%s', value, result)
         except Exception:
             logging.exception('Reading position restore failed')
 
