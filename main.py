@@ -63,7 +63,7 @@ def index():
 
     def refresh_selected():
         # Keep every button's original blue appearance. Only active text changes.
-        active_style = ('background:#569bd5!important;color:#e00000!important;'
+        active_style = ('background:#569bd5!important;color:#000000!important;'
                         'font-weight:800!important;border:1px solid #bfc4c9!important;'
                         'box-shadow:none!important;')
         idle_style = ('background:#569bd5!important;color:#ffffff!important;'
