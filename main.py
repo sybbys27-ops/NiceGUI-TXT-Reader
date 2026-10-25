@@ -1,5 +1,6 @@
 """Desktop-style NiceGUI TXT reader prototype. DB/login are not enabled yet."""
 import inspect
+import asyncio
 import hmac
 import time
 import json
@@ -210,18 +211,29 @@ def index():
         value = max(0.0, min(1.0, float(position or 0.0)))
         persistence['last_position'] = value
         try:
-            # Let NiceGUI/Vue finish applying the new textarea value first.
-            await ui.run_javascript("""
-                new Promise(resolve => {
-                    requestAnimationFrame(() => requestAnimationFrame(resolve));
-                })
+            # NiceGUI/Quasar updates textarea.value asynchronously. Wait until
+            # the new book has actually been laid out before applying scroll.
+            await asyncio.sleep(0.20)
+            applied = await ui.run_javascript(f"""
+                (() => {{
+                    const el = document.querySelector('.reader-pane textarea');
+                    if (!el) throw new Error('Reader textarea DOM element missing');
+                    const max = Math.max(0, el.scrollHeight - el.clientHeight);
+                    el.scrollTop = {value} * max;
+                    return {{top: el.scrollTop, max: max}};
+                }})()
             """, timeout=10.0)
+            logging.info('Restored reading position %.6f -> %s', value, applied)
+
+            # Some browsers/Quasar updates can still settle one frame later.
+            # Re-apply once after the layout has fully stabilized.
+            await asyncio.sleep(0.15)
             await ui.run_javascript(f"""
                 (() => {{
                     const el = document.querySelector('.reader-pane textarea');
                     if (!el) throw new Error('Reader textarea DOM element missing');
                     el.scrollTop = {value} * Math.max(0, el.scrollHeight - el.clientHeight);
-                    return true;
+                    return el.scrollTop;
                 }})()
             """, timeout=10.0)
         except Exception:
