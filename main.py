@@ -73,6 +73,8 @@ html, body, #app { overflow:hidden!important; }
 .archive-entry.archive-active { background:#b5dafa; border-color:#598db8; }
 .archive-entry.archive-active:hover { background:#72b6e7!important; }
 .archive-entry .q-btn.archive-title { flex:1 1 0; min-width:0; min-height:26px; padding:0 3px; justify-content:flex-start!important; text-align:left!important; color:#183047!important; font-size:12px; font-weight:400; text-transform:none; }
+.archive-entry .q-btn.archive-title .q-btn__content { width:100%; min-width:0; display:flex; justify-content:flex-start!important; text-align:left!important; }
+.archive-entry .q-btn.archive-title .q-btn__content span { display:block; width:100%; padding-left:4px; text-align:left!important; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 .archive-entry.archive-active .q-btn.archive-title { font-weight:700; }
 .archive-entry .q-btn.archive-delete { flex:0 0 25px; width:25px; min-width:25px; min-height:25px; padding:0; color:#2784c5; }
 .archive-entry .q-btn.archive-delete:hover { color:#bd3030; background:rgba(255,255,255,.45); }
@@ -169,36 +171,44 @@ def index():
         refresh_selected()
 
     async def capture_position():
-        """Capture and save only when DB Save is clicked in read mode."""
+        """Persist scroll only on explicit DB Save from read mode."""
         if not state['book_id'] or state['editing'] or not session_is_valid():
             return False
         try:
-            position = await ui.run_javascript(
-                f"""(() => {{
-                    const root = getElement({reader.id})?.$el;
-                    const el = root?.matches?.('textarea') ? root : root?.querySelector?.('textarea');
-                    if (!el) throw new Error('Reader textarea not available');
+            position = await ui.run_javascript("""
+                (() => {
+                    const el = document.querySelector('.reader-pane textarea');
+                    if (!el) throw new Error('Reader textarea DOM element missing');
                     const max = Math.max(0, el.scrollHeight - el.clientHeight);
-                    return max > 0 ? el.scrollTop / max : 0;
-                }})()""", timeout=8.0)
+                    return max > 0 ? Math.min(1, Math.max(0, el.scrollTop / max)) : 0;
+                })()
+            """, timeout=10.0)
+            if position is None:
+                raise ValueError('Scroll position returned null')
             position = max(0.0, min(1.0, float(position)))
             db.save_position(state['book_id'], position)
             persistence['last_position'] = position
             return True
         except Exception:
-            logging.exception('Reading position save failed; document content was saved')
+            logging.exception('Reading position save failed; book content remains saved')
             return False
 
     async def restore_position(position):
         value = max(0.0, min(1.0, float(position or 0.0)))
         persistence['last_position'] = value
-        await ui.run_javascript(
-            f"""(() => {{
-                const el = getElement({{reader.id}}).$el.querySelector('textarea');
-                if (el) requestAnimationFrame(() => {{
-                    el.scrollTop = ({value}) * Math.max(0, el.scrollHeight - el.clientHeight);
-                }});
-            }})()""".replace('{reader.id}', str(reader.id)), timeout=5.0)
+        try:
+            await ui.run_javascript(f"""
+                (() => {{
+                    const el = document.querySelector('.reader-pane textarea');
+                    if (!el) throw new Error('Reader textarea DOM element missing');
+                    requestAnimationFrame(() => {{
+                        el.scrollTop = {value} * Math.max(0, el.scrollHeight - el.clientHeight);
+                    }});
+                    return true;
+                }})()
+            """, timeout=10.0)
+        except Exception:
+            logging.exception('Reading position restore failed')
 
     async def sync_persistence():
         if not session_is_valid():
