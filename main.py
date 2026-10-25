@@ -407,6 +407,11 @@ def index():
                 ui.notify('문서를 찾을 수 없습니다.', type='warning')
                 return
 
+            logging.info(
+                'BOOK_LOAD_DIAG id=%s filename=%s reading_position=%r type=%s',
+                book[0], book[1], book[3], type(book[3]).__name__,
+            )
+
             # A book switch discards any unsaved temporary scroll position.
             await reset_scroll()
 
