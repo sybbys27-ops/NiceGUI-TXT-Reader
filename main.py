@@ -222,7 +222,7 @@ def index():
                         const el = document.querySelector('.reader-pane textarea');
                         if (!el) {{
                             if (++tries > 20) return reject(new Error('Reader textarea DOM element missing'));
-                            return setTimeout(apply, 50);
+                            return setTimeout(apply, 500);
                         }}
 
                         const height = el.scrollHeight;
@@ -245,9 +245,9 @@ def index():
                                     max: finalMax,
                                     ratio: finalMax > 0 ? el.scrollTop / finalMax : 0
                                 }});
-                            }}, 120);
+                            }}, 500);
                         }} else {{
-                            setTimeout(apply, 80);
+                            setTimeout(apply, 500);
                         }}
                     }};
 
@@ -543,7 +543,7 @@ def index():
         except Exception:
             logging.exception('Neon initialization failed')
     persistence['settings_dirty'] = False
-    ui.timer(3.0, sync_persistence)
+    ui.timer(0.5, sync_persistence)
 
 
 ui.run(
