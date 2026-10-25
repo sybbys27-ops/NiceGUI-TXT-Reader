@@ -67,6 +67,14 @@ html, body, #app { overflow:hidden!important; }
 .reader-side-head .q-field__native { min-height:27px; padding:0 5px; font-size:12px; }
 .archive-label { font-size:12px; font-weight:bold; padding:6px 7px 4px; }
 .archive-scroller { flex:1; overflow:auto; }
+.archive-entry { display:flex; flex-wrap:nowrap; align-items:center; width:100%; min-height:29px; padding:0 2px 0 5px; margin:0; gap:2px; border:1px solid #92b3d0; background:#e5f0f8; transition:background-color .12s ease; }
+.archive-entry:hover { background:#82bee9!important; }
+.archive-entry.archive-active { background:#b5dafa; border-color:#598db8; }
+.archive-entry.archive-active:hover { background:#72b6e7!important; }
+.archive-entry .q-btn.archive-title { flex:1 1 0; min-width:0; min-height:26px; padding:0 3px; justify-content:flex-start!important; text-align:left!important; color:#183047!important; font-size:12px; font-weight:400; text-transform:none; }
+.archive-entry.archive-active .q-btn.archive-title { font-weight:700; }
+.archive-entry .q-btn.archive-delete { flex:0 0 25px; width:25px; min-width:25px; min-height:25px; padding:0; color:#2784c5; }
+.archive-entry .q-btn.archive-delete:hover { color:#bd3030; background:rgba(255,255,255,.45); }
 .archive-note { margin:5px 8px; padding:12px 7px; border:1px dashed #b2bfcb; font-size:11px; color:#64717f; background:#f8fafc; }
 .status-note { flex:0 0 auto; font-size:11px; color:#59616d; padding:0 8px 4px; background:#edf2f6; }
 @media(max-width:700px) {
@@ -242,6 +250,7 @@ def index():
             filename.value = book[1]
             reader.value = book[2]
             set_mode(False)
+            reload_books()
             ui.notify('DB 문서를 불러왔습니다.', type='positive')
         except Exception:
             logging.exception('DB load failed')
@@ -277,9 +286,10 @@ def index():
             books = db.list_books()
             with archive:
                 for book_id, book_name, modified in books:
-                    with ui.row().classes('w-full items-center gap-1 border-b px-2 py-1'):
-                        ui.button(book_name, on_click=lambda bid=book_id: open_book(bid)).props('flat no-caps dense').classes('grow text-left').style('min-width:0;white-space:normal;')
-                        ui.button(icon='delete_outline', on_click=lambda bid=book_id, name=book_name: confirm_delete(bid, name)).props('flat dense').tooltip('삭제')
+                    selected = book_id == state['book_id']
+                    with ui.row().classes('archive-entry' + (' archive-active' if selected else '')):
+                        ui.button(book_name, on_click=lambda bid=book_id: open_book(bid)).props('flat no-caps dense').classes('archive-title').tooltip(book_name)
+                        ui.button(icon='delete_outline', on_click=lambda bid=book_id, name=book_name: confirm_delete(bid, name)).props('flat round dense').classes('archive-delete').tooltip('삭제')
                 if not books:
                     ui.label('저장된 책이 없습니다.').classes('text-xs p-2')
         except Exception:
@@ -331,7 +341,6 @@ def index():
             read_button = ui.button('읽기', on_click=switch_to_read)
             edit_button = ui.button('수정', on_click=lambda: set_mode(True))
             ui.space()
-            ui.button('DB 불러오기', on_click=reload_books)
             ui.button('DB 저장하기', on_click=save_to_db)
             ui.button('로그아웃', on_click=logout)
         with ui.row().classes('reader-content w-full gap-0'):
@@ -350,7 +359,7 @@ def index():
                     ui.label('DB 연결 후 목록 새로고침').classes('archive-note')
         with ui.row().classes('status-note w-full items-center gap-3'):
             mode_label = ui.label('읽기 모드')
-            ui.label('UI 미리보기 · DB 및 인증 미연결 · 개인 문서 업로드 주의')
+            ui.label('NeonDB 연결 · 개인 서재')
 
     font_size.on('update:model-value', apply_style)
     line_spacing.on('update:model-value', apply_style)
