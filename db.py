@@ -1,5 +1,6 @@
 """Neon PostgreSQL storage for the single-user TXT reader."""
 import os
+import json
 import uuid
 from contextlib import contextmanager
 
@@ -29,6 +30,34 @@ def ensure_schema():
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS reader_settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                preferences JSONB NOT NULL DEFAULT '{}'::jsonb
+            )
+        """)
+
+
+def load_settings():
+    with connection() as conn, conn.cursor() as cur:
+        cur.execute('SELECT preferences FROM reader_settings WHERE id=1')
+        record = cur.fetchone()
+        return record[0] if record else {}
+
+
+def save_settings(settings):
+    with connection() as conn, conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO reader_settings(id, preferences) VALUES (1, %s::jsonb)
+            ON CONFLICT (id) DO UPDATE SET preferences=EXCLUDED.preferences
+        """, (json.dumps(settings),))
+
+
+def save_position(book_id, position):
+    position = max(0.0, min(1.0, float(position)))
+    with connection() as conn, conn.cursor() as cur:
+        cur.execute('UPDATE documents SET reading_position=%s WHERE id=%s',
+                    (position, book_id))
 
 
 def list_books():
