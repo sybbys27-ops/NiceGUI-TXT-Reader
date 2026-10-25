@@ -62,7 +62,7 @@ def save_position(book_id, position):
 
 def list_books():
     with connection() as conn, conn.cursor() as cur:
-        cur.execute('SELECT id::text, filename, updated_at FROM documents ORDER BY updated_at DESC')
+        cur.execute('SELECT id::text, filename, updated_at FROM documents ORDER BY lower(filename) ASC, filename ASC, id ASC')
         return cur.fetchall()
 
 
