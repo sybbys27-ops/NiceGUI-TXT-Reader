@@ -6,10 +6,10 @@ import getpass
 import secrets
 from argon2 import PasswordHasher
 
-password = getpass.getpass('새 로그인 비밀번호: ')
-confirmation = getpass.getpass('비밀번호 확인: ')
-if password != confirmation or len(password) < 12:
-    raise SystemExit('비밀번호가 일치하지 않거나 12자 미만입니다.')
+password = getpass.getpass('새 숫자 4자리 PIN: ')
+confirmation = getpass.getpass('PIN 확인: ')
+if password != confirmation or len(password) != 4 or not password.isascii() or not password.isdecimal():
+    raise SystemExit('PIN이 일치하지 않거나 숫자 4자리가 아닙니다.')
 print('\nRender Environment에 다음 값을 각각 등록하세요:')
 print('APP_PASSWORD_HASH=' + PasswordHasher().hash(password))
 print('STORAGE_SECRET=' + secrets.token_urlsafe(48))
