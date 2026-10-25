@@ -167,23 +167,19 @@ def index():
         refresh_selected()
 
     async def capture_position():
+        """Save the reading location only when Save is clicked in read mode."""
         if not state['book_id'] or not session_is_valid() or state['editing']:
             return
-        book_id = state['book_id']
-        try:
-            position = await ui.run_javascript(
-                f"""(() => {{
-                    const el = getElement({{reader.id}}).$el.querySelector('textarea');
-                    if (!el) return 0;
-                    const max = Math.max(0, el.scrollHeight - el.clientHeight);
-                    return max ? el.scrollTop / max : 0;
-                }})()""".replace('{reader.id}', str(reader.id)), timeout=5.0)
-            position = max(0.0, min(1.0, float(position)))
-            if book_id == state['book_id'] and (persistence['last_position'] is None or abs(position - persistence['last_position']) > 0.0001):
-                db.save_position(book_id, position)
-                persistence['last_position'] = position
-        except Exception:
-            logging.exception('Reading-position save failed')
+        position = await ui.run_javascript(
+            f"""(() => {{
+                const el = getElement({reader.id}).$el.querySelector('textarea');
+                if (!el) return 0;
+                const max = Math.max(0, el.scrollHeight - el.clientHeight);
+                return max ? el.scrollTop / max : 0;
+            }})()""", timeout=5.0)
+        position = max(0.0, min(1.0, float(position)))
+        db.save_position(state['book_id'], position)
+        persistence['last_position'] = position
 
     async def restore_position(position):
         value = max(0.0, min(1.0, float(position or 0.0)))
@@ -205,7 +201,6 @@ def index():
                 persistence['settings_dirty'] = False
             except Exception:
                 logging.exception('Reader settings save failed')
-        await capture_position()
 
 
     def refresh_selected():
@@ -254,7 +249,6 @@ def index():
         refresh_selected()
 
     async def new_page():
-        await capture_position()
         filename.value = ''
         reader.value = ''
         state.update(source='new', book_id=None, original_name='', original_text='')
@@ -269,7 +263,6 @@ def index():
         set_mode(False)
 
     async def load_text(event):
-        await capture_position()
         try:
             raw = event.file.read()
             if inspect.isawaitable(raw):
@@ -315,9 +308,13 @@ def index():
                          original_name=filename.value, original_text=reader.value or '')
             if is_new_book:
                 persistence['last_position'] = None
-            set_mode(False)
+            was_editing = state['editing']
+            if not was_editing:
+                await capture_position()
+            if was_editing:
+                set_mode(False)
             reload_books()
-            ui.notify('DB 저장 완료', type='positive')
+            ui.notify('본문 저장 완료' if was_editing else '본문 및 읽던 위치 저장 완료', type='positive')
         except Exception:
             logging.exception('DB save failed')
             ui.notify('저장 실패: 파일명, 용량, DB 연결을 확인하세요.', type='negative')
