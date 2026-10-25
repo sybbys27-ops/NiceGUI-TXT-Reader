@@ -1,2 +1,3 @@
 nicegui>=2.0,<4.0
 argon2-cffi>=23.1,<26
+psycopg[binary]>=3.2,<4
