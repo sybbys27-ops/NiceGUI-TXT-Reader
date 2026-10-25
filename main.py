@@ -193,17 +193,34 @@ def index():
             logging.exception('Reading position save failed; book content remains saved')
             return False
 
+    async def reset_scroll():
+        try:
+            await ui.run_javascript("""
+                (() => {
+                    const el = document.querySelector('.reader-pane textarea');
+                    if (!el) throw new Error('Reader textarea DOM element missing');
+                    el.scrollTop = 0;
+                    return true;
+                })()
+            """, timeout=10.0)
+        except Exception:
+            logging.exception('Reader scroll reset failed')
+
     async def restore_position(position):
         value = max(0.0, min(1.0, float(position or 0.0)))
         persistence['last_position'] = value
         try:
+            # Let NiceGUI/Vue finish applying the new textarea value first.
+            await ui.run_javascript("""
+                new Promise(resolve => {
+                    requestAnimationFrame(() => requestAnimationFrame(resolve));
+                })
+            """, timeout=10.0)
             await ui.run_javascript(f"""
                 (() => {{
                     const el = document.querySelector('.reader-pane textarea');
                     if (!el) throw new Error('Reader textarea DOM element missing');
-                    requestAnimationFrame(() => {{
-                        el.scrollTop = {value} * Math.max(0, el.scrollHeight - el.clientHeight);
-                    }});
+                    el.scrollTop = {value} * Math.max(0, el.scrollHeight - el.clientHeight);
                     return true;
                 }})()
             """, timeout=10.0)
@@ -358,11 +375,17 @@ def index():
             if not book:
                 ui.notify('문서를 찾을 수 없습니다.', type='warning')
                 return
+
+            # A book switch discards any unsaved temporary scroll position.
+            await reset_scroll()
+
             state.update(source='db', book_id=book[0], original_name=book[1], original_text=book[2])
             filename.value = book[1]
             reader.value = book[2]
             set_mode(False)
             reload_books()
+
+            # Restore only the position explicitly saved for this book.
             await restore_position(book[3])
             ui.notify('DB 문서를 불러왔습니다.', type='positive')
         except Exception:
