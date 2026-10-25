@@ -1,5 +1,7 @@
 """Desktop-style NiceGUI TXT reader prototype. DB/login are not enabled yet."""
+import inspect
 import json
+import logging
 import os
 
 from nicegui import ui
@@ -72,7 +74,10 @@ def index():
 
     def set_mode(edit):
         state['editing'] = edit
-        reader.props(remove='readonly' if edit else None, add='readonly' if not edit else None)
+        if edit:
+            reader.props(remove='readonly')
+        else:
+            reader.props('readonly')
         mode_label.text = '수정 모드' if edit else '읽기 모드'
 
     def new_page():
@@ -88,33 +93,46 @@ def index():
         set_mode(False)
 
     async def load_text(event):
-        raw = event.file.read()
-        if len(raw) > MAX_BYTES:
-            ui.notify('TXT는 최대 3MB까지 지원합니다.', type='negative')
-            return
         try:
-            content = raw.decode('utf-8-sig')
-        except UnicodeDecodeError:
-            try:
-                content = raw.decode('cp949')
-            except UnicodeDecodeError:
-                ui.notify('UTF-8 또는 CP949 인코딩만 지원합니다.', type='negative')
+            raw = event.file.read()
+            if inspect.isawaitable(raw):
+                raw = await raw
+            if len(raw) > MAX_BYTES:
+                ui.notify('TXT는 최대 3MB까지 지원합니다.', type='negative')
                 return
-        filename.value = event.file.name.rsplit('.', 1)[0]
-        reader.value = content
-        state['source'] = 'pc'
-        set_mode(False)
-        upload_dialog.close()
-        ui.notify('TXT 파일을 불러왔습니다.')
+            try:
+                content = raw.decode('utf-8-sig')
+            except UnicodeDecodeError:
+                try:
+                    content = raw.decode('cp949')
+                except UnicodeDecodeError:
+                    ui.notify('UTF-8 또는 CP949 인코딩만 지원합니다.', type='negative')
+                    return
+            filename.value = event.file.name.rsplit('.', 1)[0]
+            reader.value = content
+            state['source'] = 'pc'
+            set_mode(False)
+            ui.notify(f'TXT 파일을 불러왔습니다: {event.file.name}', type='positive')
+        except Exception:
+            logging.exception('TXT upload failed')
+            ui.notify('파일 읽기에 실패했습니다. Render Logs를 확인해주세요.', type='negative')
+        finally:
+            uploader.reset()
 
     with ui.column().classes('reader-shell w-full gap-0'):
         ui.label('텍스트 북리더').classes('reader-header w-full')
         with ui.row().classes('reader-toolbar w-full'):
-            with ui.dialog() as upload_dialog, ui.card():
-                ui.label('PC에서 TXT 파일 열기').classes('font-bold')
-                ui.upload(on_upload=load_text, auto_upload=True, max_file_size=MAX_BYTES).props('accept=.txt')
-                ui.button('닫기', on_click=upload_dialog.close)
-            ui.button('📂 열기', on_click=upload_dialog.open)
+            uploader = ui.upload(
+                on_upload=load_text,
+                on_rejected=lambda: ui.notify('TXT 파일은 최대 3MB입니다.', type='negative'),
+                auto_upload=True,
+                max_file_size=MAX_BYTES,
+            ).props('accept=.txt').classes('hidden')
+            open_button = ui.button('📂 열기')
+            open_button.on(
+                'click',
+                js_handler=f'() => getElement({uploader.id}).$refs.qRef.pickFiles()',
+            )
             ui.button('새 페이지', on_click=new_page)
             ui.label('글크기:')
             font_size = ui.number(value=16, min=10, max=36, step=1).props('dense outlined').classes('w-16')
