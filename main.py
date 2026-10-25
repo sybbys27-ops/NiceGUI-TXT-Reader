@@ -15,10 +15,12 @@ DEFAULT_TEXT = (
 ui.add_head_html("""
 <style>
 html, body, #app { height:100%; margin:0; }\nbody { margin:0; font-family:'Malgun Gothic','Noto Sans KR',sans-serif; background:#edf2f6; }
-.q-page { min-height:100vh; }
-.reader-shell { display:flex; flex-direction:column; height:100dvh; min-height:0; overflow:hidden; background:#edf2f6; }
+.q-page { min-height:0!important; height:100dvh!important; overflow:hidden!important; }
+.nicegui-content { padding:0!important; margin:0!important; width:100%!important; height:100dvh!important; min-height:0!important; overflow:hidden!important; }
+html, body, #app { overflow:hidden!important; }
+.reader-shell { display:flex; flex-direction:column; width:100%; height:100dvh; max-height:100dvh; min-height:0; overflow:hidden; background:#edf2f6; }
 .reader-header { height:31px; flex:0 0 31px; background:#0877c6; color:white; padding:5px 12px; font-size:12px; }
-.reader-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:5px; padding:7px 10px; background:#f1f1f1; border-bottom:1px solid #d0d4d8; min-height:54px; }
+.reader-toolbar { flex:0 0 auto; display:flex; flex-wrap:wrap; align-items:center; gap:5px; padding:7px 10px; background:#f1f1f1; border-bottom:1px solid #d0d4d8; min-height:54px; }
 .reader-toolbar .q-btn { min-height:28px; padding:0 7px; font-size:12px; border:1px solid #bfc4c9; border-radius:1px; background:#fafafa; color:#1e252c; box-shadow:none; text-transform:none; }
 .reader-toolbar .q-field { font-size:12px; }
 .reader-toolbar .q-field__control { min-height:30px; height:30px; }
@@ -39,7 +41,7 @@ html, body, #app { height:100%; margin:0; }\nbody { margin:0; font-family:'Malgu
 .archive-label { font-size:12px; font-weight:bold; padding:6px 7px 4px; }
 .archive-scroller { flex:1; overflow:auto; }
 .archive-note { margin:5px 8px; padding:12px 7px; border:1px dashed #b2bfcb; font-size:11px; color:#64717f; background:#f8fafc; }
-.status-note { font-size:11px; color:#59616d; padding:0 8px 4px; background:#edf2f6; }
+.status-note { flex:0 0 auto; font-size:11px; color:#59616d; padding:0 8px 4px; background:#edf2f6; }
 @media(max-width:700px) {
  .reader-shell { min-height:100dvh; height:100dvh; }
  .reader-toolbar { padding:5px; gap:3px; }
