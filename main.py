@@ -258,6 +258,7 @@ def index():
         filename.value = ''
         reader.value = ''
         state.update(source='new', book_id=None, original_name='', original_text='')
+        persistence['last_position'] = None
         set_mode(True)
         ui.notify('새 페이지를 만들었습니다.')
 
@@ -287,6 +288,7 @@ def index():
             filename.value = event.file.name.rsplit('.', 1)[0]
             reader.value = content
             state.update(source='pc', book_id=None, original_name=filename.value, original_text=content)
+            persistence['last_position'] = None
             set_mode(False)
             ui.notify(f'TXT 파일을 불러왔습니다: {event.file.name}', type='positive')
         except Exception:
@@ -308,8 +310,11 @@ def index():
             return
         try:
             book_id = db.save_book(state['book_id'], filename.value or '', reader.value or '')
+            is_new_book = state['book_id'] is None
             state.update(source='db', book_id=book_id,
                          original_name=filename.value, original_text=reader.value or '')
+            if is_new_book:
+                persistence['last_position'] = None
             set_mode(False)
             reload_books()
             ui.notify('DB 저장 완료', type='positive')
