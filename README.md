@@ -47,3 +47,11 @@ PIN 정책: 개인용 간편 로그인은 **숫자 4자리**만 허용합니다.
 Render Environment에 `DATABASE_URL`을 등록하세요. Neon의 pooled PostgreSQL connection string을 그대로 사용하며 GitHub에 공개하지 않습니다. `APP_PASSWORD_HASH`와 `STORAGE_SECRET`도 유지해야 합니다.
 
 Render Branch를 `feature/neon-db`로 변경하면 앱은 첫 로그인 후 `documents` 테이블을 자동 생성합니다. 문서별 UUID를 기준으로 INSERT/UPDATE/DELETE하며, 우측 MY ARCHIVE 목록에서 선택 및 삭제할 수 있습니다. 글꼴 설정과 마지막 읽던 위치 저장은 다음 개발 단계입니다. **실제 DB에 연결해 실행 검증하기 전의 개발 기능입니다.**
+
+
+## 읽기 위치 및 화면 설정 저장 (2026-10-25)
+
+- 책의 스크롤 위치는 `documents.reading_position`에 0~1 사이의 비율로 저장합니다. 활성 책을 읽는 동안 약 3초 간격으로 변경 여부를 검사하며, 책 전환 및 로그아웃 시에도 저장을 시도합니다.
+- 공통 테마, 배경색, 글자색, 글꼴 크기, 줄 간격은 `reader_settings` 테이블의 JSONB 한 행에 저장합니다. 다음 로그인/새로고침 시 복원합니다.
+- 스크롤 저장은 브라우저 종료 직전의 마지막 수 초 동안 발생한 변경까지 반드시 보장하지는 않습니다. 위치 복원은 텍스트 영역의 상대 스크롤 비율을 이용하므로 폰트/창 크기 변경 시 정확한 문장 위치는 달라질 수 있습니다.
+- Neon 연결 및 Render 실행 검증 전이므로 PR #3은 Draft로 유지합니다. 기존 문서 데이터 삭제/초기화는 하지 않습니다.
