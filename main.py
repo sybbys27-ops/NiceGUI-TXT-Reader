@@ -1,12 +1,35 @@
 """Desktop-style NiceGUI TXT reader prototype. DB/login are not enabled yet."""
 import inspect
+import hmac
+import time
 import json
 import logging
 import os
 
-from nicegui import ui
+from argon2 import PasswordHasher, exceptions as argon_errors
+from nicegui import app, ui
 
 MAX_BYTES = 3 * 1024 * 1024
+PASSWORD_HASH = os.getenv('APP_PASSWORD_HASH', '')
+STORAGE_SECRET = os.getenv('STORAGE_SECRET', '')
+SESSION_SECONDS = 12 * 60 * 60
+hasher = PasswordHasher()
+# Server-side throttling for a single-browser login session. A reverse-proxy
+# or provider-level limiter should be added before allowing broader access.
+_login_failures: dict[str, tuple[int, float]] = {}
+
+
+def session_is_valid() -> bool:
+    return (
+        app.storage.user.get('authenticated') is True
+        and float(app.storage.user.get('expires_at', 0)) > time.time()
+    )
+
+
+def clear_login() -> None:
+    app.storage.user['authenticated'] = False
+    app.storage.user.pop('expires_at', None)
+
 DEFAULT_TEXT = (
     '상단의 [열기] 버튼을 눌러 PC의 텍스트 파일을 불러오세요.\n\n'
     '- 글자 크기와 줄 간격을 자유롭게 조절할 수 있습니다.\n'
@@ -57,6 +80,48 @@ html, body, #app { overflow:hidden!important; }
 
 @ui.page('/')
 def index():
+    if not STORAGE_SECRET or not PASSWORD_HASH:
+        with ui.column().classes('items-center mx-auto mt-20 gap-4'):
+            ui.label('TXT Reader — 초기 보안 설정 필요').classes('text-xl font-bold')
+            ui.label('Render에 APP_PASSWORD_HASH 및 STORAGE_SECRET을 설정하세요.')
+            ui.label('인증 설정이 완료되기 전에는 문서 화면을 열 수 없습니다.')
+        return
+
+    if not session_is_valid():
+        clear_login()
+        with ui.column().classes('items-center mx-auto mt-20 gap-4 w-full'):
+            with ui.card().classes('w-full max-w-sm p-5 gap-4'):
+                ui.label('TXT Reader 로그인').classes('text-xl font-bold')
+                password_input = ui.input('숫자 4자리 PIN', password=True, password_toggle_button=True).props('maxlength=4 inputmode=numeric pattern=[0-9]{4}').props('outlined').classes('w-full')
+                notice = ui.label('').classes('text-sm text-red-700')
+
+                async def try_login():
+                    identifier = ui.context.client.id
+                    count, blocked_until = _login_failures.get(identifier, (0, 0.0))
+                    if blocked_until > time.monotonic():
+                        notice.text = '로그인 시도가 제한되었습니다. 잠시 후 다시 시도하세요.'
+                        return
+                    try:
+                        pin = password_input.value or ''
+                        valid = (len(pin) == 4 and pin.isascii() and pin.isdecimal() and
+                                 hasher.verify(PASSWORD_HASH, pin))
+                    except (argon_errors.VerifyMismatchError, argon_errors.VerificationError, argon_errors.InvalidHashError):
+                        valid = False
+                    if not valid:
+                        count += 1
+                        _login_failures[identifier] = (count, time.monotonic() + 300 if count >= 5 else 0.0)
+                        password_input.value = ''
+                        notice.text = '비밀번호가 올바르지 않습니다.'
+                        return
+                    _login_failures.pop(identifier, None)
+                    app.storage.user['authenticated'] = True
+                    app.storage.user['expires_at'] = time.time() + SESSION_SECONDS
+                    ui.navigate.to('/')
+
+                ui.button('로그인', on_click=try_login).classes('w-full')
+                password_input.on('keydown.enter', try_login)
+        return
+
     state = {'source': 'new', 'editing': False, 'theme': '라이트'}
     themes = {'라이트': ('#ffffff', '#1e242b'), '다크': ('#202124', '#f1f1f1'), '세피아': ('#f5ecd9', '#4b3d2b')}
     colors = {'bg': '#ffffff', 'fg': '#1e242b'}
@@ -142,6 +207,10 @@ def index():
         finally:
             uploader.reset()
 
+    def logout():
+        clear_login()
+        ui.navigate.to('/')
+
     with ui.column().classes('reader-shell w-full gap-0'):
         ui.label('텍스트 북리더').classes('reader-header w-full')
         with ui.row().classes('reader-toolbar w-full'):
@@ -184,6 +253,7 @@ def index():
             ui.space()
             ui.button('DB 불러오기').props('disable').tooltip('NeonDB 연결 후 활성화됩니다.')
             ui.button('DB 저장하기').props('disable').tooltip('NeonDB 연결 후 활성화됩니다.')
+            ui.button('로그아웃', on_click=logout)
         with ui.row().classes('reader-content w-full gap-0'):
             with ui.column().classes('reader-main gap-0') as panel:
                 reader = ui.textarea(value=DEFAULT_TEXT).props('borderless readonly').classes('reader-pane w-full')
@@ -208,4 +278,10 @@ def index():
     refresh_selected()
 
 
-ui.run(host='0.0.0.0', port=int(os.getenv('PORT', '8080')), reload=False, title='TXT Reader')
+ui.run(
+    host='0.0.0.0',
+    port=int(os.getenv('PORT', '8080')),
+    reload=False,
+    title='TXT Reader',
+    storage_secret=STORAGE_SECRET or 'NOT_CONFIGURED__DO_NOT_USE_FOR_PRODUCTION',
+)
