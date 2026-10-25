@@ -25,3 +25,16 @@ Open http://localhost:8080. Render Web Service can use `render.yaml`.
 Never commit passwords, connection strings, or actual book text.
 
 New and PC-loaded documents will INSERT a new UUID when saved. DB-loaded books will UPDATE by ID even when the filename changes. Copy/save-as is postponed to V1.1.
+
+
+## 로그인 인증 설정 (feature/login-auth)
+
+보안 기능은 개발 브랜치에서 시험 중입니다. 로그인/배포 검증 전에는 `main`으로 합치지 않습니다.
+
+1. 로컬 PC에서 `pip install argon2-cffi`를 실행합니다.
+2. `python scripts/generate_auth_secrets.py`를 실행하고, 12자 이상의 비밀번호를 두 번 입력합니다.
+3. 출력되는 `APP_PASSWORD_HASH`와 `STORAGE_SECRET` 값을 Render 서비스의 **Environment**에 각각 입력합니다.
+4. Render의 Branch를 `feature/login-auth`로 바꿔 재배포 후 로그인 화면을 확인합니다.
+5. 테스트가 끝나면 기존 브랜치로 돌아가거나 이 브랜치를 PR로 병합합니다.
+
+비밀번호, 비밀번호 해시, 세션 비밀키는 **절대로 GitHub에 커밋하지 마세요**. 둘 중 하나라도 비어 있으면 앱은 문서 화면 대신 초기 설정 안내를 표시합니다. 인증 세션은 최대 12시간입니다. 현재 로그인 실패 제한은 브라우저 연결 단위의 간단한 제한이며 공개 서비스에 대한 강력한 IP별 요청 제한을 대체하지 못합니다. 아직 Neon 저장 기능은 구현되지 않았습니다.
