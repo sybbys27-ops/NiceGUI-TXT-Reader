@@ -62,13 +62,18 @@ def index():
     colors = {'bg': '#ffffff', 'fg': '#1e242b'}
 
     def refresh_selected():
+        # Inline important styles override NiceGUI/Quasar button color defaults.
+        active_style = ('background:#183e63!important;color:#fff!important;'
+                        'border:2px solid #efbd54!important;'
+                        'box-shadow:inset 0 -3px 0 #efbd54!important;'
+                        'font-weight:700!important;')
+        idle_style = ('background:#e8edf2!important;color:#263646!important;'
+                      'border:1px solid #aebbc8!important;'
+                      'box-shadow:none!important;font-weight:400!important;')
         for name, button in theme_buttons.items():
-            button.classes(add='selected-tool' if name == state['theme'] else None,
-                           remove='selected-tool' if name != state['theme'] else None)
-        read_button.classes(add='selected-tool' if not state['editing'] else None,
-                            remove='selected-tool' if state['editing'] else None)
-        edit_button.classes(add='selected-tool' if state['editing'] else None,
-                            remove='selected-tool' if not state['editing'] else None)
+            button.style(active_style if name == state['theme'] else idle_style)
+        read_button.style(idle_style if state['editing'] else active_style)
+        edit_button.style(active_style if state['editing'] else idle_style)
 
     def set_theme(name):
         state['theme'] = name
