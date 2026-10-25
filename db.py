@@ -26,9 +26,14 @@ def ensure_schema():
                 filename TEXT NOT NULL,
                 content TEXT NOT NULL,
                 reading_position DOUBLE PRECISION NOT NULL DEFAULT 0,
+                has_saved_position BOOLEAN NOT NULL DEFAULT FALSE,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
+        """)
+        cur.execute("""
+            ALTER TABLE documents
+            ADD COLUMN IF NOT EXISTS has_saved_position BOOLEAN NOT NULL DEFAULT FALSE
         """)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS reader_settings (
@@ -56,7 +61,7 @@ def save_settings(settings):
 def save_position(book_id, position):
     position = max(0.0, min(1.0, float(position)))
     with connection() as conn, conn.cursor() as cur:
-        cur.execute('UPDATE documents SET reading_position=%s WHERE id=%s',
+        cur.execute('UPDATE documents SET reading_position=%s, has_saved_position=TRUE WHERE id=%s',
                     (position, book_id))
 
 
