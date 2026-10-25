@@ -92,7 +92,7 @@ def index():
         with ui.column().classes('items-center mx-auto mt-20 gap-4 w-full'):
             with ui.card().classes('w-full max-w-sm p-5 gap-4'):
                 ui.label('TXT Reader 로그인').classes('text-xl font-bold')
-                password_input = ui.input('비밀번호', password=True, password_toggle_button=True).props('outlined').classes('w-full')
+                password_input = ui.input('숫자 4자리 PIN', password=True, password_toggle_button=True).props('maxlength=4 inputmode=numeric pattern=[0-9]{4}').props('outlined').classes('w-full')
                 notice = ui.label('').classes('text-sm text-red-700')
 
                 async def try_login():
@@ -102,7 +102,9 @@ def index():
                         notice.text = '로그인 시도가 제한되었습니다. 잠시 후 다시 시도하세요.'
                         return
                     try:
-                        valid = hasher.verify(PASSWORD_HASH, password_input.value or '')
+                        pin = password_input.value or ''
+                        valid = (len(pin) == 4 and pin.isascii() and pin.isdecimal() and
+                                 hasher.verify(PASSWORD_HASH, pin))
                     except (argon_errors.VerifyMismatchError, argon_errors.VerificationError, argon_errors.InvalidHashError):
                         valid = False
                     if not valid:
