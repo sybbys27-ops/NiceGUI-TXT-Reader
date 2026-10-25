@@ -1,13 +1,14 @@
-"""Desktop-style NiceGUI TXT reader prototype. DB/login are not enabled yet."""
+"""Personal NiceGUI TXT reader with PIN login and Neon persistence."""
 import inspect
-import hmac
 import time
 import json
 import logging
 import os
+import re
 
 from argon2 import PasswordHasher, exceptions as argon_errors
 from nicegui import app, ui
+import db
 
 MAX_BYTES = 3 * 1024 * 1024
 PASSWORD_HASH = os.getenv('APP_PASSWORD_HASH', '')
@@ -66,6 +67,16 @@ html, body, #app { overflow:hidden!important; }
 .reader-side-head .q-field__native { min-height:27px; padding:0 5px; font-size:12px; }
 .archive-label { font-size:12px; font-weight:bold; padding:6px 7px 4px; }
 .archive-scroller { flex:1; overflow:auto; }
+.archive-entry { display:flex; flex-wrap:nowrap; align-items:center; width:100%; min-height:29px; padding:0 2px 0 5px; margin:0; gap:2px; border:1px solid #92b3d0; background:#e5f0f8; transition:background-color .12s ease; }
+.archive-entry:hover { background:#82bee9!important; }
+.archive-entry.archive-active { background:#b5dafa; border-color:#598db8; }
+.archive-entry.archive-active:hover { background:#72b6e7!important; }
+.archive-entry .q-btn.archive-title { flex:1 1 0; min-width:0; min-height:26px; padding:0 3px; justify-content:flex-start!important; text-align:left!important; color:#183047!important; font-size:12px; font-weight:400; text-transform:none; }
+.archive-entry .q-btn.archive-title .q-btn__content { width:100%; min-width:0; display:flex; justify-content:flex-start!important; text-align:left!important; }
+.archive-entry .q-btn.archive-title .q-btn__content span { display:block; width:100%; padding-left:4px; text-align:left!important; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.archive-entry.archive-active .q-btn.archive-title { font-weight:700; }
+.archive-entry .q-btn.archive-delete { flex:0 0 25px; width:25px; min-width:25px; min-height:25px; padding:0; color:#2784c5; }
+.archive-entry .q-btn.archive-delete:hover { color:#bd3030; background:rgba(255,255,255,.45); }
 .archive-note { margin:5px 8px; padding:12px 7px; border:1px dashed #b2bfcb; font-size:11px; color:#64717f; background:#f8fafc; }
 .status-note { flex:0 0 auto; font-size:11px; color:#59616d; padding:0 8px 4px; background:#edf2f6; }
 @media(max-width:700px) {
@@ -122,9 +133,139 @@ def index():
                 password_input.on('keydown.enter', try_login)
         return
 
-    state = {'source': 'new', 'editing': False, 'theme': '라이트'}
-    themes = {'라이트': ('#ffffff', '#1e242b'), '다크': ('#202124', '#f1f1f1'), '세피아': ('#f5ecd9', '#4b3d2b')}
-    colors = {'bg': '#ffffff', 'fg': '#1e242b'}
+    state = {'source': 'new', 'editing': False, 'theme': '라이트', 'book_id': None, 'original_name': '', 'original_text': ''}
+    themes = {'라이트': ('#ECEFE6', '#2A2A2A'), '다크': ('#22252A', '#E5E0D8'), '기본색': ('#ffffff', '#1e242b')}
+    colors = {'bg': '#ECEFE6', 'fg': '#2A2A2A'}
+    custom_colors = {'bg': '#ffffff', 'fg': '#1e242b'}
+    persistence = {'settings_dirty': False, 'last_position': None}
+    archive_rows = {}
+
+    def mark_settings_dirty():
+        persistence['settings_dirty'] = True
+
+    def collect_settings():
+        return {
+            'theme': state['theme'],
+            'bg': custom_colors['bg'],
+            'fg': custom_colors['fg'],
+            'font_size': max(10, min(36, int(font_size.value or 16))),
+            'line_spacing': max(1.0, min(3.0, float(line_spacing.value or 1.8))),
+        }
+
+    def restore_settings(settings):
+        theme = settings.get('theme', '라이트')
+        state['theme'] = theme if theme in themes else None
+        for key, default in [('bg', '#ffffff'), ('fg', '#1e242b')]:
+            value = settings.get(key, default)
+            custom_colors[key] = value if isinstance(value, str) and re.fullmatch(r'#[0-9a-fA-F]{6}', value) else default
+        try:
+            font_size.value = max(10, min(36, int(settings.get('font_size', 16))))
+            line_spacing.value = max(1.0, min(3.0, float(settings.get('line_spacing', 1.8))))
+        except (TypeError, ValueError):
+            font_size.value = 16
+            line_spacing.value = 1.8
+        colors.update(custom_colors if state['theme'] in ('기본색', None) else dict(zip(('bg','fg'), themes[state['theme']])))
+        background_picker.value = custom_colors['bg']
+        foreground_picker.value = custom_colors['fg']
+        apply_style()
+        refresh_selected()
+
+    async def capture_position():
+        """Persist scroll only on explicit DB Save from read mode."""
+        if not state['book_id'] or state['editing'] or not session_is_valid():
+            return False
+        try:
+            position = await ui.run_javascript("""
+                (() => {
+                    const el = document.querySelector('.reader-pane textarea');
+                    if (!el) throw new Error('Reader textarea DOM element missing');
+                    const max = Math.max(0, el.scrollHeight - el.clientHeight);
+                    return max > 0 ? Math.min(1, Math.max(0, el.scrollTop / max)) : 0;
+                })()
+            """, timeout=10.0)
+            if position is None:
+                raise ValueError('Scroll position returned null')
+            position = max(0.0, min(1.0, float(position)))
+            db.save_position(state['book_id'], position)
+            persistence['last_position'] = position
+            return True
+        except Exception:
+            logging.exception('Reading position save failed; book content remains saved')
+            return False
+
+    async def reset_scroll():
+        try:
+            await ui.run_javascript("""
+                (() => {
+                    const el = document.querySelector('.reader-pane textarea');
+                    if (!el) throw new Error('Reader textarea DOM element missing');
+                    el.scrollTop = 0;
+                    return true;
+                })()
+            """, timeout=10.0)
+        except Exception:
+            logging.exception('Reader scroll reset failed')
+
+    async def restore_position(position):
+        value = max(0.0, min(1.0, float(position or 0.0)))
+        persistence['last_position'] = value
+        try:
+            result = await ui.run_javascript(f"""
+                new Promise((resolve, reject) => {{
+                    const target = {value};
+                    let tries = 0;
+                    let lastHeight = -1;
+                    let stableCount = 0;
+
+                    const apply = () => {{
+                        const el = document.querySelector('.reader-pane textarea');
+                        if (!el) {{
+                            if (++tries > 20) return reject(new Error('Reader textarea DOM element missing'));
+                            return setTimeout(apply, 500);
+                        }}
+
+                        const height = el.scrollHeight;
+                        if (height === lastHeight) stableCount += 1;
+                        else stableCount = 0;
+                        lastHeight = height;
+
+                        const max = Math.max(0, el.scrollHeight - el.clientHeight);
+                        el.scrollTop = target * max;
+
+                        // Wait until the new book layout stops changing, then
+                        // apply the saved position once more and verify it.
+                        if (stableCount >= 2 || ++tries > 20) {{
+                            setTimeout(() => {{
+                                const finalMax = Math.max(0, el.scrollHeight - el.clientHeight);
+                                el.scrollTop = target * finalMax;
+                                resolve({{
+                                    target: target,
+                                    top: el.scrollTop,
+                                    max: finalMax,
+                                    ratio: finalMax > 0 ? el.scrollTop / finalMax : 0
+                                }});
+                            }}, 500);
+                        }} else {{
+                            setTimeout(apply, 500);
+                        }}
+                    }};
+
+                    apply();
+                }})
+            """, timeout=12.0)
+        except Exception:
+            logging.exception('Reading position restore failed')
+
+    async def sync_persistence():
+        if not session_is_valid():
+            return
+        if persistence['settings_dirty']:
+            try:
+                db.save_settings(collect_settings())
+                persistence['settings_dirty'] = False
+            except Exception:
+                logging.exception('Reader settings save failed')
+
 
     def refresh_selected():
         # Keep every button's original blue appearance. Only active text changes.
@@ -141,17 +282,21 @@ def index():
 
     def set_theme(name):
         state['theme'] = name
-        colors['bg'], colors['fg'] = themes[name]
+        colors.update(custom_colors if name == '기본색' else dict(zip(('bg', 'fg'), themes[name])))
         apply_style()
         refresh_selected()
+        mark_settings_dirty()
 
     def custom_color(kind, value):
-        colors[kind] = value
-        state['theme'] = None
+        custom_colors[kind] = value
+        colors.update(custom_colors)
+        state['theme'] = '기본색'
         apply_style()
         refresh_selected()
+        mark_settings_dirty()
 
     def apply_style():
+        mark_settings_dirty()
         size = int(font_size.value or 16)
         space = float(line_spacing.value or 1.8)
         panel.style(
@@ -168,16 +313,18 @@ def index():
         mode_label.text = '수정 모드' if edit else '읽기 모드'
         refresh_selected()
 
-    def new_page():
+    async def new_page():
         filename.value = ''
         reader.value = ''
-        state['source'] = 'new'
+        state.update(source='new', book_id=None, original_name='', original_text='')
+        persistence['last_position'] = None
         set_mode(True)
         ui.notify('새 페이지를 만들었습니다.')
 
     def switch_to_read():
-        # DB-loaded unsaved edits will revert when DB persistence is implemented.
-        # New or PC-loaded documents must not be silently destroyed.
+        if state['source'] == 'db':
+            filename.value = state['original_name']
+            reader.value = state['original_text']
         set_mode(False)
 
     async def load_text(event):
@@ -198,7 +345,8 @@ def index():
                     return
             filename.value = event.file.name.rsplit('.', 1)[0]
             reader.value = content
-            state['source'] = 'pc'
+            state.update(source='pc', book_id=None, original_name=filename.value, original_text=content)
+            persistence['last_position'] = None
             set_mode(False)
             ui.notify(f'TXT 파일을 불러왔습니다: {event.file.name}', type='positive')
         except Exception:
@@ -207,7 +355,124 @@ def index():
         finally:
             uploader.reset()
 
-    def logout():
+    def require_login():
+        if not session_is_valid():
+            ui.notify('세션이 만료되었습니다. 다시 로그인하세요.', type='negative')
+            ui.navigate.to('/')
+            return False
+        return True
+
+    async def save_to_db():
+        if not require_login():
+            return
+        was_editing = state['editing']
+        try:
+            book_id = db.save_book(state['book_id'], filename.value or '', reader.value or '')
+        except ValueError as error:
+            ui.notify(str(error), type='negative')
+            return
+        except Exception:
+            logging.exception('Book content save failed')
+            ui.notify('본문 DB 저장 실패: Render 로그에서 Book content save failed 확인', type='negative')
+            return
+
+        is_new_book = state['book_id'] is None
+        state.update(source='db', book_id=book_id,
+                     original_name=filename.value, original_text=reader.value or '')
+        if is_new_book:
+            persistence['last_position'] = None
+
+        position_saved = True
+        if not was_editing:
+            position_saved = await capture_position()
+        else:
+            set_mode(False)
+
+        reload_books()
+        if was_editing:
+            ui.notify('파일명과 본문 저장 완료 (읽던 위치 유지)', type='positive')
+        elif position_saved:
+            ui.notify('본문과 읽던 위치 저장 완료', type='positive')
+        else:
+            ui.notify('본문 저장 완료. 읽던 위치 저장은 실패했습니다 (Render 로그 확인).', type='warning')
+
+    def refresh_archive_selection(active_book_id):
+        for bid, row in archive_rows.items():
+            if bid == active_book_id:
+                row.classes(add='archive-active')
+            else:
+                row.classes(remove='archive-active')
+
+    async def open_book(book_id):
+        if not require_login():
+            return
+        try:
+            book = db.get_book(book_id)
+            if not book:
+                ui.notify('문서를 찾을 수 없습니다.', type='warning')
+                return
+
+            # A book switch discards any unsaved temporary scroll position.
+            await reset_scroll()
+
+            state.update(source='db', book_id=book[0], original_name=book[1], original_text=book[2])
+            filename.value = book[1]
+            reader.value = book[2]
+            set_mode(False)
+
+            # Keep archive rows alive; rebuilding them here deletes the click slot.
+            await restore_position(book[3])
+            refresh_archive_selection(book[0])
+            ui.notify('DB 문서를 불러왔습니다.', type='positive')
+        except Exception:
+            logging.exception('DB load failed')
+            ui.notify('DB 문서를 열지 못했습니다.', type='negative')
+
+    def remove_book(book_id):
+        if not require_login():
+            return
+        try:
+            db.delete_book(book_id)
+            if state['book_id'] == book_id:
+                ui.navigate.to('/')
+            reload_books()
+            ui.notify('영구 삭제했습니다.', type='positive')
+        except Exception:
+            logging.exception('DB delete failed')
+            ui.notify('삭제에 실패했습니다.', type='negative')
+
+    def confirm_delete(book_id, name):
+        with ui.dialog() as dialog, ui.card():
+            ui.label(f'“{name}” 문서를 영구 삭제할까요?')
+            with ui.row():
+                ui.button('취소', on_click=dialog.close)
+                ui.button('영구 삭제', color='negative',
+                          on_click=lambda: (dialog.close(), remove_book(book_id)))
+        dialog.open()
+
+    def reload_books():
+        if not require_login():
+            return
+        archive.clear()
+        archive_rows.clear()
+        try:
+            books = db.list_books()
+            with archive:
+                for book_id, book_name, modified in books:
+                    selected = book_id == state['book_id']
+                    with ui.row().classes('archive-entry' + (' archive-active' if selected else '')) as row:
+                        archive_rows[book_id] = row
+                        ui.button(book_name, on_click=lambda bid=book_id: open_book(bid)).props('flat no-caps dense').classes('archive-title').tooltip(book_name)
+                        ui.button(icon='delete_outline', on_click=lambda bid=book_id, name=book_name: confirm_delete(bid, name)).props('flat round dense').classes('archive-delete').tooltip('삭제')
+                if not books:
+                    ui.label('저장된 책이 없습니다.').classes('text-xs p-2')
+        except Exception:
+            logging.exception('DB listing failed')
+            with archive:
+                ui.label('DB 연결이 필요합니다. Render DATABASE_URL을 확인하세요.').classes('text-xs p-2 text-red-600')
+
+    async def logout():
+        await sync_persistence()
         clear_login()
         ui.navigate.to('/')
 
@@ -232,13 +497,13 @@ def index():
             line_spacing = ui.number(value=1.8, min=1.0, max=3.0, step=0.1, format='%.1f').props('dense outlined').classes('w-16')
             with ui.dialog() as background_dialog, ui.card():
                 ui.label('바탕색 변경')
-                ui.color_input(label='배경색', value='#ffffff',
+                background_picker = ui.color_input(label='배경색', value='#ffffff',
                                on_change=lambda e: custom_color('bg', e.value))
                 ui.button('닫기', on_click=background_dialog.close)
             ui.button('바탕색 변경', on_click=background_dialog.open)
             with ui.dialog() as foreground_dialog, ui.card():
                 ui.label('글자색 변경')
-                ui.color_input(label='글자색', value='#1e242b',
+                foreground_picker = ui.color_input(label='글자색', value='#1e242b',
                                on_change=lambda e: custom_color('fg', e.value))
                 ui.button('닫기', on_click=foreground_dialog.close)
             ui.button('글자색 변경', on_click=foreground_dialog.open)
@@ -251,8 +516,7 @@ def index():
             read_button = ui.button('읽기', on_click=switch_to_read)
             edit_button = ui.button('수정', on_click=lambda: set_mode(True))
             ui.space()
-            ui.button('DB 불러오기').props('disable').tooltip('NeonDB 연결 후 활성화됩니다.')
-            ui.button('DB 저장하기').props('disable').tooltip('NeonDB 연결 후 활성화됩니다.')
+            ui.button('DB 저장하기', on_click=save_to_db)
             ui.button('로그아웃', on_click=logout)
         with ui.row().classes('reader-content w-full gap-0'):
             with ui.column().classes('reader-main gap-0') as panel:
@@ -266,16 +530,27 @@ def index():
                     ui.label('File Name').classes('text-xs font-bold')
                     filename = ui.input().props('dense borderless').classes('grow min-w-0')
                 ui.label('MY ARCHIVE').classes('archive-label')
-                with ui.column().classes('archive-scroller w-full gap-0'):
-                    ui.label('저장된 책 목록은 NeonDB 연결 후 표시됩니다.').classes('archive-note')
+                with ui.column().classes('archive-scroller w-full gap-0') as archive:
+                    ui.label('DB 연결 후 목록 새로고침').classes('archive-note')
         with ui.row().classes('status-note w-full items-center gap-3'):
             mode_label = ui.label('읽기 모드')
-            ui.label('UI 미리보기 · DB 및 인증 미연결 · 개인 문서 업로드 주의')
+            ui.label('NeonDB 연결 · 개인 서재')
 
     font_size.on('update:model-value', apply_style)
     line_spacing.on('update:model-value', apply_style)
     apply_style()
     refresh_selected()
+    if os.getenv('DATABASE_URL'):
+        try:
+            db.ensure_schema()
+            saved_settings = db.load_settings()
+            if saved_settings:
+                restore_settings(saved_settings)
+            reload_books()
+        except Exception:
+            logging.exception('Neon initialization failed')
+    persistence['settings_dirty'] = False
+    ui.timer(0.5, sync_persistence)
 
 
 ui.run(
