@@ -298,7 +298,6 @@ def index():
         return True
 
     async def save_to_db():
-        await capture_position()
         if not require_login():
             return
         try:
@@ -320,7 +319,6 @@ def index():
             ui.notify('저장 실패: 파일명, 용량, DB 연결을 확인하세요.', type='negative')
 
     async def open_book(book_id):
-        await capture_position()
         if not require_login():
             return
         try:
